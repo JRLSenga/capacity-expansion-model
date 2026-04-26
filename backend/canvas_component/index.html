@@ -1,0 +1,468 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: #f5f5f5; font-family: system-ui, sans-serif; overflow: hidden; }
+#canvas { width: 100%; height: 260px; position: relative; }
+svg { width: 100%; height: 100%; }
+.lbl { pointer-events: none; font-family: system-ui, sans-serif; }
+#hint {
+  position: absolute; bottom: 6px; left: 50%;
+  transform: translateX(-50%);
+  font-size: 10px; color: #999;
+  background: rgba(255,255,255,.85);
+  padding: 2px 10px; border-radius: 10px;
+  white-space: nowrap; pointer-events: none;
+}
+
+/* ── Info popup ── */
+#popup {
+  display: none; position: absolute; z-index: 10;
+  background: #fff; border: 1px solid #d0d0d0; border-radius: 3px;
+  box-shadow: 0 4px 20px rgba(0,0,0,.15); width: 240px;
+  font-family: system-ui, sans-serif; font-size: 11px; color: #333;
+  overflow: hidden;
+}
+.p-hdr {
+  background: #14213d; color: #fff; padding: 7px 10px;
+  font-size: 12px; font-weight: 700;
+  display: flex; align-items: center; justify-content: space-between;
+}
+.p-close { cursor: pointer; font-size: 15px; line-height: 1; opacity: .7; padding: 0 2px; }
+.p-close:hover { opacity: 1; }
+.p-info {
+  padding: 5px 10px; border-bottom: 1px solid #f0f0f0;
+  font-size: 11px; color: #555;
+}
+.p-info strong { color: #14213d; font-weight: 700; }
+.p-warn {
+  padding: 4px 10px; background: #fff5f5; color: #A31F34;
+  font-size: 10px; font-weight: 600; border-bottom: 1px solid #fdd;
+}
+.p-sep {
+  background: #f5f5f5; padding: 3px 10px; font-size: 9px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 1px; color: #999;
+  border-top: 1px solid #e8e8e8; border-bottom: 1px solid #e8e8e8;
+}
+.p-gen-row {
+  display: flex; align-items: center; padding: 5px 10px;
+  border-bottom: 1px solid #f5f5f5; gap: 7px;
+}
+.p-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.p-gen-label { flex: 1; font-size: 10px; font-weight: 600; color: #333; text-transform: uppercase; letter-spacing: .4px; }
+.p-gen-mw { font-size: 11px; font-weight: 700; color: #14213d; }
+.p-gen-exist { font-size: 9px; color: #aaa; white-space: nowrap; }
+.p-empty { padding: 8px 10px; font-size: 10px; color: #bbb; text-align: center; }
+.p-footer {
+  padding: 5px 10px 6px; font-size: 9px; color: #bbb;
+  text-align: center; border-top: 1px solid #f0f0f0; background: #fafafa;
+}
+.p-re-bar { height: 5px; background: #e8e8e8; margin: 0 10px 6px; border-radius: 3px; overflow: hidden; }
+.p-re-fill { height: 100%; background: #27AE60; border-radius: 3px; }
+.p-cost-row {
+  display: flex; align-items: center; padding: 3px 10px; gap: 6px;
+  border-bottom: 1px solid #f8f8f8;
+}
+.p-cost-dot { width: 7px; height: 7px; border-radius: 2px; flex-shrink: 0; }
+.p-cost-label { flex: 1; font-size: 9px; color: #666; }
+.p-cost-bar-wrap { width: 56px; height: 5px; background: #eee; border-radius: 2px; overflow: hidden; }
+.p-cost-bar-fill { height: 100%; border-radius: 2px; }
+.p-cost-val { font-size: 9px; font-weight: 700; color: #14213d; white-space: nowrap; min-width: 38px; text-align: right; }
+.p-cost-total {
+  padding: 4px 10px; font-size: 10px; font-weight: 700;
+  color: #14213d; background: #f5f5f5;
+  border-top: 1px solid #e0e0e0; display: flex; justify-content: space-between;
+}
+</style>
+</head>
+<body>
+<div id="canvas">
+  <svg id="svg"></svg>
+  <div id="hint">Drag to reposition &nbsp;·&nbsp; Click for zone info</div>
+  <div id="popup"></div>
+</div>
+<script>
+// ── Streamlit Component Protocol ──────────────────────────────────────────────
+var _renderCb = null;
+window.addEventListener("message", function(e) {
+  if (e.data && e.data.type === "streamlit:render" && _renderCb) {
+    _renderCb(e.data.args);
+  }
+});
+function setComponentValue(val) {
+  window.parent.postMessage({
+    isStreamlitMessage: true,
+    type: "streamlit:setComponentValue",
+    value: val,
+    dataType: "json",
+  }, "*");
+}
+function setFrameHeight(h) {
+  window.parent.postMessage({
+    isStreamlitMessage: true,
+    type: "streamlit:setFrameHeight",
+    height: h,
+  }, "*");
+}
+window.parent.postMessage({
+  isStreamlitMessage: true,
+  type: "streamlit:componentReady",
+  apiVersion: 1,
+}, "*");
+
+// ── Canvas ────────────────────────────────────────────────────────────────────
+var COLORS = ["#14213d","#1e3464","#2d4a7a","#c0392b","#7d1728","#3a5a9a","#1a4a6a"];
+var svgNS  = "http://www.w3.org/2000/svg";
+var svg    = document.getElementById("svg");
+var popup  = document.getElementById("popup");
+
+var nodes = [];
+var edgesData = [];
+
+function el(tag, attrs) {
+  var e = document.createElementNS(svgNS, tag);
+  for (var k in attrs) e.setAttribute(k, attrs[k]);
+  return e;
+}
+function W() { return svg.clientWidth  || 600; }
+function H() { return svg.clientHeight || 260; }
+
+function initPos() {
+  nodes.forEach(function(n) {
+    n.px = n.x * W();
+    n.py = n.y * H();
+  });
+}
+
+// ── Edge helpers ──────────────────────────────────────────────────────────────
+function edgeColor(util) {
+  if (util === undefined || util === null) return "#bbb";
+  if (util > 0.8) return "#A31F34";
+  if (util > 0.5) return "#E8A020";
+  if (util > 0.2) return "#2D7DD2";
+  return "#9ab";
+}
+function edgeWidth(util) {
+  if (util === undefined || util === null) return 2;
+  return Math.max(1.5, Math.min(5, 1.5 + util * 4));
+}
+
+// ── Popup ─────────────────────────────────────────────────────────────────────
+function showPopup(node) {
+  var hasResult = (node.re_pct !== undefined);
+  var dispTechs = (hasResult && node.result_techs && node.result_techs.length > 0)
+    ? node.result_techs : (node.techs || []);
+  var fleetLabel = hasResult ? "Installed Capacity" : "Generation Fleet";
+
+  var techsHtml = "";
+  if (dispTechs.length > 0) {
+    dispTechs.forEach(function(t) {
+      var mwVal  = hasResult ? (t.cap_mw + " MW") : (t.mw + " MW");
+      var exTxt  = (!hasResult && t.existing > 0)
+        ? '<span class="p-gen-exist">' + t.existing + ' exist.</span>' : "";
+      techsHtml +=
+        '<div class="p-gen-row">' +
+          '<span class="p-dot" style="background:' + t.color + ';"></span>' +
+          '<span class="p-gen-label">' + t.label + '</span>' +
+          '<span class="p-gen-mw">' + mwVal + '</span>' + exTxt +
+        '</div>';
+    });
+  } else {
+    techsHtml = '<div class="p-empty">No generators configured</div>';
+  }
+
+  var resultHtml = "";
+  if (hasResult) {
+    var re = node.re_pct || 0;
+    var emStr = (node.emissions_tco2 !== undefined)
+      ? (node.emissions_tco2 === 0
+          ? "0 t CO₂/yr"
+          : node.emissions_tco2.toLocaleString() + " t CO₂/yr")
+      : "—";
+    var lcoeStr = (node.lcoe !== undefined && node.lcoe > 0)
+      ? "$" + node.lcoe + "/MWh" : "—";
+
+    // Cost breakdown bars
+    var costsHtml = "";
+    var zoneCosts = node.zone_costs || [];
+    if (zoneCosts.length > 0) {
+      var maxVal = 0;
+      zoneCosts.forEach(function(c) { if (c.value_k > maxVal) maxVal = c.value_k; });
+      zoneCosts.forEach(function(c) {
+        var pct = maxVal > 0 ? Math.round(c.value_k / maxVal * 100) : 0;
+        var valStr = c.value_k >= 1000
+          ? "$" + (c.value_k / 1000).toFixed(1) + "M"
+          : "$" + c.value_k.toLocaleString() + "k";
+        costsHtml +=
+          '<div class="p-cost-row">' +
+            '<span class="p-cost-dot" style="background:' + c.color + ';"></span>' +
+            '<span class="p-cost-label">' + c.label + '</span>' +
+            '<div class="p-cost-bar-wrap"><div class="p-cost-bar-fill" style="width:' + pct + '%;background:' + c.color + ';"></div></div>' +
+            '<span class="p-cost-val">' + valStr + '</span>' +
+          '</div>';
+      });
+      var totalStr = (node.zone_total_cost_m !== undefined)
+        ? "$" + node.zone_total_cost_m + "M/yr" : "—";
+      costsHtml += '<div class="p-cost-total"><span>Total</span><span>' + totalStr + '</span></div>';
+    }
+
+    resultHtml =
+      '<div class="p-sep">Optimization Result</div>' +
+      '<div class="p-info">RE share: <strong>' + re + '%</strong></div>' +
+      '<div class="p-re-bar"><div class="p-re-fill" style="width:' + Math.min(re,100) + '%;"></div></div>' +
+      '<div class="p-info">Total installed: <strong>' + (node.total_cap_mw || 0) + ' MW</strong></div>' +
+      '<div class="p-info">Zone LCOE: <strong>' + lcoeStr + '</strong></div>' +
+      '<div class="p-info">Emissions: <strong>' + emStr + '</strong></div>' +
+      (node.has_unserved ? '<div class="p-warn">⚠ Unserved load detected</div>' : '') +
+      (costsHtml ? '<div class="p-sep">Cost Breakdown</div>' + costsHtml : '');
+  }
+
+  popup.innerHTML =
+    '<div class="p-hdr">' +
+      '<span>' + node.name + '</span>' +
+      '<span class="p-close" onclick="closePopup()">&#x2715;</span>' +
+    '</div>' +
+    '<div class="p-info">Peak load: <strong>' + node.load + ' MW</strong></div>' +
+    resultHtml +
+    '<div class="p-sep">' + fleetLabel + '</div>' +
+    techsHtml +
+    '<div class="p-footer">Drag to reposition &nbsp;·&nbsp; Edit fleet below ↓</div>';
+
+  var pw = 215, ph = popup.scrollHeight || 200;
+  var px = node.px + 36, py = node.py - ph / 2;
+  if (px + pw > W() - 4) px = node.px - pw - 36;
+  py = Math.max(4, Math.min(H() - ph - 4, py));
+  popup.style.left    = px + "px";
+  popup.style.top     = py + "px";
+  popup.style.display = "block";
+}
+
+function closePopup() { popup.style.display = "none"; }
+
+// ── Drag ──────────────────────────────────────────────────────────────────────
+var drag = null, dragSX = 0, dragSY = 0, dragMoved = false;
+function getSVGPos(e) {
+  var r  = svg.getBoundingClientRect();
+  var cx = e.touches ? e.touches[0].clientX : e.clientX;
+  var cy = e.touches ? e.touches[0].clientY : e.clientY;
+  return { x: cx - r.left, y: cy - r.top };
+}
+
+// ── Draw ──────────────────────────────────────────────────────────────────────
+function draw() {
+  while (svg.firstChild) svg.removeChild(svg.firstChild);
+
+  // ── Edges ──
+  for (var i = 0; i < edgesData.length; i++) {
+    var edge = edgesData[i];
+    var a = nodes.find(function(n) { return n.id === edge.from; });
+    var b = nodes.find(function(n) { return n.id === edge.to;   });
+    if (!a || !b) continue;
+
+    var hasUtil = (edge.util !== undefined && edge.util !== null);
+    var col = edgeColor(edge.util);
+    var wid = edgeWidth(edge.util);
+
+    var lineAttrs = {
+      x1: a.px, y1: a.py, x2: b.px, y2: b.py,
+      stroke: col, "stroke-width": wid,
+    };
+    if (!hasUtil) lineAttrs["stroke-dasharray"] = "6 4";
+    svg.appendChild(el("line", lineAttrs));
+
+    // Edge label: utilization + avg flow when results available
+    var tx = (a.px + b.px) / 2, ty = (a.py + b.py) / 2;
+    var lblTxt = hasUtil
+      ? (Math.round((edge.util || 0) * 100) + "% · " + (edge.avg_flow || 0) + " MW")
+      : (edge.cap + " MW");
+    var lbl = el("text", {
+      x: tx, y: ty - 6, "text-anchor": "middle",
+      "font-size": "9.5", fill: hasUtil ? col : "#888",
+      "font-family": "system-ui", "font-weight": hasUtil ? "700" : "400",
+      class: "lbl"
+    });
+    lbl.textContent = lblTxt;
+    svg.appendChild(lbl);
+
+    // Net flow direction arrow at midpoint
+    if (hasUtil && edge.net_flow !== undefined && Math.abs(edge.net_flow) > 1) {
+      var fromNode = edge.net_flow >= 0 ? a : b;
+      var toNode   = edge.net_flow >= 0 ? b : a;
+      var dx = toNode.px - fromNode.px, dy = toNode.py - fromNode.py;
+      var len = Math.sqrt(dx*dx + dy*dy) || 1;
+      var mx = (fromNode.px + toNode.px) / 2, my = (fromNode.py + toNode.py) / 2;
+      var ux = dx/len, uy = dy/len;
+      var al = 7;
+      var pts = mx+","+my+" "+(mx-ux*al+uy*3.5)+","+(my-uy*al-ux*3.5)+" "+(mx-ux*al-uy*3.5)+","+(my-uy*al+ux*3.5);
+      svg.appendChild(el("polygon", { points: pts, fill: col, opacity: "0.85" }));
+    }
+  }
+
+  // ── Nodes ──
+  for (var j = 0; j < nodes.length; j++) {
+    (function(node) {
+      var g = el("g", {
+        transform: "translate(" + node.px + "," + node.py + ")",
+        "data-id": node.id, style: "cursor:pointer"
+      });
+
+      // Shadow + main circle
+      g.appendChild(el("circle", { cx: 0, cy: 0, r: 28, fill: "rgba(0,0,0,.08)" }));
+      g.appendChild(el("circle", { cx: 0, cy: 0, r: 26, fill: node.col }));
+
+      // RE% arc (green ring, starts at 12 o'clock, clockwise)
+      if (node.re_pct !== undefined && node.re_pct > 0) {
+        var r = 29, circ = 2 * Math.PI * r;
+        var filled = circ * Math.min(node.re_pct, 100) / 100;
+        g.appendChild(el("circle", {
+          cx: 0, cy: 0, r: r,
+          fill: "none", stroke: "#27AE60", "stroke-width": "3.5",
+          "stroke-dasharray": filled + " " + (circ - filled),
+          "stroke-dashoffset": "" + (circ / 4),
+          opacity: "0.9",
+        }));
+      }
+
+      // Unserved energy badge (red dot, top-right)
+      if (node.has_unserved) {
+        g.appendChild(el("circle", { cx: 19, cy: -19, r: 6, fill: "#A31F34" }));
+        var ub = el("text", {
+          x: 19, y: -15.5, "text-anchor": "middle",
+          "font-size": "8", "font-weight": "700",
+          fill: "#fff", "font-family": "system-ui", class: "lbl"
+        });
+        ub.textContent = "!";
+        g.appendChild(ub);
+      }
+
+      // Zone name label
+      var t1 = el("text", { x: 0, y: 4, "text-anchor": "middle", class: "lbl",
+        "font-size": "12", "font-weight": "700", fill: "#fff", "font-family": "system-ui" });
+      t1.textContent = node.name.replace("Zone ", "");
+      g.appendChild(t1);
+
+      // Load sub-label
+      var t2 = el("text", { x: 0, y: 16, "text-anchor": "middle", class: "lbl",
+        "font-size": "9", fill: "rgba(255,255,255,.7)", "font-family": "system-ui" });
+      t2.textContent = node.load + " MW";
+      g.appendChild(t2);
+
+      // RE% label (only after solve)
+      if (node.re_pct !== undefined) {
+        var t3 = el("text", { x: 0, y: 27, "text-anchor": "middle", class: "lbl",
+          "font-size": "8", fill: "#5dcc8a", "font-family": "system-ui", "font-weight": "700" });
+        t3.textContent = node.re_pct + "% RE";
+        g.appendChild(t3);
+      }
+
+      // Tech-type dots arc below circle
+      var techs = node.techs || [];
+      if (techs.length > 0) {
+        var dotY = node.re_pct !== undefined ? 42 : 34;
+        var spacing = Math.min(10, 60 / techs.length);
+        var startX  = -(techs.length - 1) * spacing / 2;
+        techs.forEach(function(tech, idx) {
+          g.appendChild(el("circle", {
+            cx: startX + idx * spacing, cy: dotY,
+            r: 3.5, fill: tech.color,
+            stroke: "#fff", "stroke-width": "1"
+          }));
+        });
+      }
+
+      g.addEventListener("mousedown", function(e) {
+        var p = getSVGPos(e);
+        dragSX = p.x; dragSY = p.y; dragMoved = false;
+        drag = { node: node, ox: p.x - node.px, oy: p.y - node.py };
+        e.preventDefault();
+      });
+      g.addEventListener("touchstart", function(e) {
+        var p = getSVGPos(e);
+        dragSX = p.x; dragSY = p.y; dragMoved = false;
+        drag = { node: node, ox: p.x - node.px, oy: p.y - node.py };
+      }, { passive: true });
+
+      svg.appendChild(g);
+    })(nodes[j]);
+  }
+}
+
+svg.addEventListener("mousedown", function(e) {
+  if (e.target === svg) closePopup();
+});
+
+document.addEventListener("mousemove", function(e) {
+  if (!drag) return;
+  var p = getSVGPos(e);
+  if (Math.hypot(p.x - dragSX, p.y - dragSY) > 5) dragMoved = true;
+  drag.node.px = Math.max(32, Math.min(W() - 32, p.x - drag.ox));
+  drag.node.py = Math.max(42, Math.min(H() - 42, p.y - drag.oy));
+  draw();
+});
+
+document.addEventListener("mouseup", function(e) {
+  if (drag) {
+    if (dragMoved) {
+      setComponentValue({
+        type: "move", id: drag.node.id,
+        x: parseFloat((drag.node.px / W()).toFixed(4)),
+        y: parseFloat((drag.node.py / H()).toFixed(4))
+      });
+    } else {
+      showPopup(drag.node);
+    }
+    drag = null;
+  }
+});
+
+document.addEventListener("touchmove", function(e) {
+  if (!drag) return;
+  var p = getSVGPos(e);
+  if (Math.hypot(p.x - dragSX, p.y - dragSY) > 8) dragMoved = true;
+  drag.node.px = Math.max(32, Math.min(W() - 32, p.x - drag.ox));
+  drag.node.py = Math.max(42, Math.min(H() - 42, p.y - drag.oy));
+  draw();
+}, { passive: true });
+
+document.addEventListener("touchend", function() {
+  if (drag) {
+    if (dragMoved) {
+      setComponentValue({
+        type: "move", id: drag.node.id,
+        x: parseFloat((drag.node.px / W()).toFixed(4)),
+        y: parseFloat((drag.node.py / H()).toFixed(4))
+      });
+    } else {
+      showPopup(drag.node);
+    }
+    drag = null;
+  }
+});
+
+window.addEventListener("resize", function() { requestAnimationFrame(initAndDraw); });
+
+// ── Receive data from Python ───────────────────────────────────────────────────
+function initAndDraw() {
+  // W() can be 0 if the iframe hasn't been laid out yet — retry until valid.
+  if (W() < 10) {
+    requestAnimationFrame(initAndDraw);
+    return;
+  }
+  initPos();
+  draw();
+}
+
+_renderCb = function(args) {
+  nodes     = args.zones.map(function(n, i) {
+    return Object.assign({}, n, { col: COLORS[i % COLORS.length], px: 0, py: 0 });
+  });
+  edgesData = args.edges;
+  setFrameHeight(320);
+  // Defer position init until layout is ready
+  requestAnimationFrame(initAndDraw);
+};
+</script>
+</body>
+</html>
