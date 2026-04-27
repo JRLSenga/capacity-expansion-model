@@ -48,10 +48,10 @@ st.set_page_config(
 GEN_CONFIG = {
     "solar":   {"label": "Solar",       "color": "#E8A020", "re": True},
     "wind":    {"label": "Wind",        "color": "#2D7DD2", "re": True},
-    "gas":     {"label": "Natural Gas", "color": "#8E6EC6", "re": False},
-    "nuclear": {"label": "Nuclear",     "color": "#E74C3C", "re": False},
-    "coal":    {"label": "Coal",        "color": "#7F8C8D", "re": False},
-    "battery": {"label": "Battery",     "color": "#27AE60", "re": False},
+    "gas":     {"label": "Natural Gas", "color": "#909090", "re": False},
+    "nuclear": {"label": "Nuclear",     "color": "#E67E22", "re": False},
+    "coal":    {"label": "Coal",        "color": "#2C2C2C", "re": False},
+    "battery": {"label": "Battery",     "color": "#8E44AD", "re": False},
 }
 GEN_TYPES_DISPLAY = ["Solar", "Wind", "Natural Gas", "Nuclear", "Coal", "Battery"]
 _DISPLAY_TO_KEY   = {v["label"]: k for k, v in GEN_CONFIG.items()}
@@ -874,8 +874,8 @@ def _canvas_data(zones: list, transmission: list, res: dict = None):
 
 _DISPATCH_COLORS = {
     "solar": "#E8A020", "wind": "#2D7DD2",
-    "gas": "#8E6EC6", "nuclear": "#E74C3C",
-    "coal": "#7F8C8D", "battery": "#27AE60",
+    "gas": "#909090", "nuclear": "#E67E22",
+    "coal": "#2C2C2C", "battery": "#8E44AD",
     "unserved": "#A31F34",
 }
 
@@ -930,7 +930,7 @@ def plot_dispatch(res, zone_id, h_start=0, h_end=167):
             fillcolor=color, line=dict(width=0),
             hovertemplate=f"{name}: %{{y:.1f}} MW<extra></extra>"))
 
-    for gtype in ("solar", "wind", "gas", "nuclear", "coal", "battery"):
+    for gtype in ("nuclear", "coal", "gas", "wind", "solar", "battery"):
         d = _zone_type_disp(res, zone_id, gtype)
         if d.max() > 0.01:
             add_pos(GEN_CONFIG[gtype]["label"], d, _DISPATCH_COLORS[gtype])
@@ -985,7 +985,7 @@ def plot_dispatch(res, zone_id, h_start=0, h_end=167):
 def plot_capacity_mix(res):
     zones = res["zones"]; fig = go.Figure()
     totals = [0.0] * len(zones)
-    for gtype in ("solar", "wind", "gas", "nuclear", "coal", "battery"):
+    for gtype in ("nuclear", "coal", "gas", "wind", "solar", "battery"):
         vals = [_zone_cap_by_type(res, z, gtype) for z in zones]
         for j, v in enumerate(vals):
             totals[j] += v
@@ -1009,10 +1009,10 @@ def plot_zone_cost_breakdown(res: dict) -> go.Figure:
     _COST_PALETTE = [
         ("Solar CapEx",   "#E8A020"),
         ("Wind CapEx",    "#2D7DD2"),
-        ("Battery CapEx", "#27AE60"),
-        ("Thermal CapEx", "#8E6EC6"),
+        ("Battery CapEx", "#8E44AD"),
+        ("Thermal CapEx", "#E67E22"),
         ("Fixed O&M",     "#5D7A8E"),
-        ("Thermal OpEx",  "#aaa"),
+        ("Thermal OpEx",  "#909090"),
         ("Unserved",      "#A31F34"),
     ]
     fig = go.Figure()
@@ -1041,8 +1041,8 @@ def plot_zone_cost_breakdown(res: dict) -> go.Figure:
 def plot_cost_breakdown(res):
     costs = res.get("costs", {})
     items = [("capex_solar","Solar CapEx","#E8A020"),("capex_wind","Wind CapEx","#2D7DD2"),
-             ("capex_batt","Batt CapEx","#27AE60"),("capex_therm","Therm CapEx","#8E6EC6"),
-             ("opex_therm","Therm OpEx","#aaa"),("opex_voll","Unserved","#A31F34")]
+             ("capex_batt","Batt CapEx","#8E44AD"),("capex_therm","Therm CapEx","#E67E22"),
+             ("opex_therm","Therm OpEx","#909090"),("opex_voll","Unserved","#A31F34")]
     labels, vals, colors = [], [], []
     for k, lbl, clr in items:
         v = costs.get(k, 0)
@@ -1965,7 +1965,7 @@ def render_solve_bar():
     res = st.session_state.last_results
     results_ready = res is not None
     if sb6.button(
-        "📊 Results", use_container_width=True,
+        "Results", use_container_width=True,
         key="view_results_btn", disabled=not results_ready,
         help="View optimization results" if results_ready else "Run Solve first",
     ):
@@ -2139,8 +2139,8 @@ def show_results_dialog():
             fig_c = go.Figure()
             for k, lbl, clr in [
                 ("capex_solar","Solar CapEx","#E8A020"),("capex_wind","Wind CapEx","#2D7DD2"),
-                ("capex_batt","Batt CapEx","#27AE60"),("capex_therm","Therm CapEx","#8E6EC6"),
-                ("opex_therm","Therm OpEx","#aaa"),("opex_voll","Unserved","#A31F34"),
+                ("capex_batt","Batt CapEx","#8E44AD"),("capex_therm","Therm CapEx","#E67E22"),
+                ("opex_therm","Therm OpEx","#909090"),("opex_voll","Unserved","#A31F34"),
             ]:
                 vals = [subset[s].get("costs",{}).get(k,0)/1e6 for s in sel]
                 if max(vals,default=0) > 0:
